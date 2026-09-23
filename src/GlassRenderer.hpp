@@ -26,8 +26,7 @@ inline constexpr float BLUR_DOWNSCALE_THRESHOLD = 0.35f; // min blur_strength fo
 
 // Tap cap in gaussianblur.frag's `min(int(ceil(blurRadius)), 8)` (Shaders.hpp) — the
 // per-pass radius where taps stop tracking radius 1:1 and the shader's designed ~3 sigma
-// coverage starts truncating. Named and shared from here rather than repeating the literal
-// so sampleReachPx() and foldBlurPasses() cannot drift from the shader's own cap.
+// coverage starts truncating. Named here so foldBlurPasses() cannot drift from the shader's cap.
 inline constexpr float BLUR_SHADER_TAP_CAP = 8.0f;
 
 // Result of folding N blur passes at a fixed radius into fewer, larger-radius passes.
@@ -46,44 +45,6 @@ struct SFoldedBlur {
 // of work or more — e.g. a wide single-pass radius needing many passes to stay untruncated),
 // the input is returned unchanged.
 [[nodiscard]] SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept;
-
-// Worst-case pixel radius, beyond a window's own box, of the raw texels the glass
-// pipeline reads to produce an output pixel at that edge: blur kernel reach + the
-// refraction pass's pull + chromatic aberration's extra spread. SAMPLE_PADDING_PX is
-// deliberately excluded — it is the extra area *blitted* around the window (already
-// folded into the padded bounding box the pass elements report to Hyprland, which is
-// what the live-blur margin below is checked against), not a read distance. Callers
-// compare this reach against Hyprland's own live-blur damage margin (1.5 *
-// CRenderPass::oneBlurRadius(), render/pass/Pass.cpp) — when the margin is smaller,
-// finalDamage discards texels this pipeline still samples.
-// foldEnabled must mirror the live `blur_fold` config value: the reach has to describe
-// what renderPass() actually reads, and renderPass() only folds when the setting is on.
-[[nodiscard]] inline float sampleReachPx(float blurStrength, int iterations, float chromaticAberration, float refractionStrength, bool foldEnabled) {
-    const int   downscale   = blurStrength >= BLUR_DOWNSCALE_THRESHOLD ? BLUR_DOWNSCALE_MAX : 1;
-    float       blurRadius  = blurStrength * 12.0f / downscale; // matches renderPass() in GlassDecoration.cpp / GlassLayerSurface.cpp
-    int         passCount   = iterations;
-
-    if (foldEnabled) {
-        const SFoldedBlur folded = foldBlurPasses(blurRadius, iterations);
-        blurRadius = folded.radius;
-        passCount  = folded.iterations;
-    }
-
-    const float tapsPerPass = std::min(std::ceil(blurRadius), BLUR_SHADER_TAP_CAP);
-    const float blurReachPx = tapsPerPass * static_cast<float>(downscale) * static_cast<float>(passCount);
-
-    // refractionPx = refractionStrength * 50.0 in the glass shader (Shaders.hpp). Negative
-    // strength (invalid but not rejected by config parsing) must not shrink the reach below
-    // the blur-only case, so it's floored at 0 here.
-    const float refractionPx = std::max(refractionStrength, 0.0f) * 50.0f;
-
-    // chromaSpread = chromaticAberration * 0.35 widens baseOffset (== refractionPx at
-    // the edge) by that fraction (Shaders.hpp) — mirrored here rather than flattened
-    // into a constant so callers with a higher chromatic_aberration get a truthful reach.
-    const float chromaticSpreadPx = chromaticAberration * 0.35f * refractionPx;
-
-    return blurReachPx + refractionPx + chromaticSpreadPx;
-}
 
 // Must match the `regionRects[16]` array size declared in Shaders.hpp.
 inline constexpr int MAX_REGION_RECTS = 16;
