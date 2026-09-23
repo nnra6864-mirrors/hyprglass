@@ -301,11 +301,23 @@ void CGlassLayerSurface::sampleAndRedirect(PHLMONITOR monitor, float alpha) {
                                    currentGeneration != m_lastSceneGeneration ||
                                    isAnimating || m_backgroundDirty || forceLive || regionBoxChanged;
 
+    const CBox sampleBox     = regionSampleBox.value_or(transformBox);
+    const bool sampleCovered = !backgroundChanged ||
+                               GlassRenderer::sampleRegionCovered(sampleBox, source, g_pHyprRenderer->m_renderData.damage);
+
     if (!layerSurface->m_mapped) {
         // During fade-out, re-sampling captures stale pixels. Reuse cached sample.
         if (!m_hasCachedSample)
             return;
         Diagnostics::recordLayerCacheHit(monitorId);
+    } else if (!sampleCovered) {
+        // the work buffer is cleared outside this frame's damage: sampling now would
+        // cache black. Without a cache, no redirect: compositeAndRestore() bails.
+        m_backgroundDirty = true;
+        damageSampleRegion();
+        Diagnostics::recordLayerDeferredResample(monitorId);
+        if (!m_hasCachedSample)
+            return;
     } else if (backgroundChanged) {
         Diagnostics::recordLayerCacheMiss(monitorId);
 

@@ -9,6 +9,7 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprutils/math/Box.hpp>
+#include <hyprutils/math/Region.hpp>
 #include <hyprutils/math/Vector2D.hpp>
 
 // Shared GL rendering pipeline used by both window decorations and layer surfaces.
@@ -130,6 +131,11 @@ struct SSampleMap {
 };
 
 [[nodiscard]] SSampleMap sampleMapFor(const CBox& box, int downscale);
+
+// True when every pixel sampleBackground() would read for `box` lies inside
+// `damage`. The only coverage predicate. `box` is in post-transform framebuffer
+// pixels like `damage`, not the logical space boundingBox() pads in.
+[[nodiscard]] bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage);
 
 void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IFramebuffer> sourceFramebuffer,
                        CBox box, Vector2D& outPaddingRatio, int downscale = 1);

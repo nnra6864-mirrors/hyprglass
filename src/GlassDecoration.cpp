@@ -17,7 +17,6 @@
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
-#include <hyprutils/math/Region.hpp>
 
 CGlassDecoration::CGlassDecoration(PHLWINDOW window)
     : IHyprWindowDecoration(window), m_window(window) {
@@ -411,12 +410,7 @@ void CGlassDecoration::renderPass(PHLMONITOR monitor, const float& alpha) {
         // the most expensive GPU work (blit + blur passes) entirely.
         Diagnostics::recordWindowCacheHit(monitorId);
     } else {
-        // sampleBackground()'s own padding math, in the same (physical,
-        // post-transform) space as transformBox — no /scale, unlike the
-        // logical-space padding boundingBox() uses.
-        CBox paddedBox = transformBox;
-        paddedBox.expand(GlassRenderer::SAMPLE_PADDING_PX);
-        const bool covered = CRegion(paddedBox).subtract(g_pHyprRenderer->m_renderData.damage).empty();
+        const bool covered = GlassRenderer::sampleRegionCovered(transformBox, source, g_pHyprRenderer->m_renderData.damage);
 
         if (covered) {
             float blurStrength   = resolvePresetFloat(ctx, &SPresetValues::blurStrength, &SOverridableConfig::blurStrength);

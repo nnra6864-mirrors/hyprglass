@@ -2,6 +2,7 @@
 #include "Globals.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <format>
 #include <string>
@@ -146,11 +147,11 @@ std::string formatStats(eHyprCtlOutputFormat format) {
             json += std::format(
                 "    {{\"name\": \"{}\", \"frames\": {}, \"windowGlassDraws\": {}, \"windowOpaqueSkipped\": {}, "
                 "\"windowCacheHits\": {}, \"windowCacheMisses\": {}, \"windowDeferredResamples\": {}, \"windowPassDiscarded\": {}, "
-                "\"layerGlassDraws\": {}, \"layerCacheHits\": {}, \"layerCacheMisses\": {}, \"blurPasses\": {}, "
+                "\"layerGlassDraws\": {}, \"layerCacheHits\": {}, \"layerCacheMisses\": {}, \"layerDeferredResamples\": {}, \"blurPasses\": {}, "
                 "\"sampledMegapixels\": {:.3f}, \"glassMegapixels\": {:.3f}, \"stageTimersAvgMicroseconds\": {{",
                 escapeJSONStrings(monitorLabel(id)), counters.frames, counters.windowGlassDraws, counters.windowOpaqueSkipped,
                 counters.windowCacheHits, counters.windowCacheMisses, counters.windowDeferredResamples, counters.windowPassDiscarded,
-                counters.layerGlassDraws, counters.layerCacheHits, counters.layerCacheMisses, counters.blurPasses,
+                counters.layerGlassDraws, counters.layerCacheHits, counters.layerCacheMisses, counters.layerDeferredResamples, counters.blurPasses,
                 counters.sampledMegapixels, counters.glassMegapixels);
 
             const auto& stageNanoseconds = stageNanosecondsFor(id);
@@ -181,17 +182,17 @@ std::string formatStats(eHyprCtlOutputFormat format) {
         out += "  (no frames recorded yet)\n";
 
     out += std::format(
-        "\n  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>10} {:>12} {:>11}\n", "monitor",
+        "\n  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>11} {:>10} {:>12} {:>11}\n", "monitor",
         "frames", "win_draws", "opaque_skip", "win_hit", "win_miss", "win_defer", "win_disc", "layer_draws", "layer_hit",
-        "layer_miss", "blur_pass", "sampled_mpx", "glass_mpx");
+        "layer_miss", "layer_defer", "blur_pass", "sampled_mpx", "glass_mpx");
 
     for (const auto& [id, counters] : s_counters) {
         out += std::format(
-            "  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>10} {:>12.2f} {:>11.2f}\n",
+            "  {:<14} {:>8} {:>10} {:>12} {:>9} {:>9} {:>10} {:>9} {:>12} {:>10} {:>10} {:>11} {:>10} {:>12.2f} {:>11.2f}\n",
             monitorLabel(id), counters.frames, counters.windowGlassDraws, counters.windowOpaqueSkipped, counters.windowCacheHits,
             counters.windowCacheMisses, counters.windowDeferredResamples, counters.windowPassDiscarded, counters.layerGlassDraws,
-            counters.layerCacheHits, counters.layerCacheMisses, counters.blurPasses, counters.sampledMegapixels,
-            counters.glassMegapixels);
+            counters.layerCacheHits, counters.layerCacheMisses, counters.layerDeferredResamples, counters.blurPasses,
+            counters.sampledMegapixels, counters.glassMegapixels);
 
         if (counters.frames > 0) {
             const double frames = static_cast<double>(counters.frames);
@@ -260,8 +261,21 @@ void recordLayerCacheMiss(MONITORID monitor) {
     countersFor(monitor).layerCacheMisses++;
 }
 
+void recordLayerDeferredResample(MONITORID monitor) {
+    countersFor(monitor).layerDeferredResamples++;
+}
+
 void recordBlurPasses(MONITORID monitor, uint64_t passes) {
     countersFor(monitor).blurPasses += passes;
+}
+
+void recordStateDesync(const char* what) {
+    static std::chrono::steady_clock::time_point lastNotification{};
+    const auto now = std::chrono::steady_clock::now();
+    if (now - lastNotification < std::chrono::seconds(2))
+        return;
+    lastNotification = now;
+    HyprlandAPI::addNotification(PHANDLE, std::format("hyprglass: GL state drift, {}", what), CHyprColor{1.0, 0.4, 0.2, 1.0}, 3000);
 }
 
 void recordSampledPixels(MONITORID monitor, double pixels) {

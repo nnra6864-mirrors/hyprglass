@@ -58,6 +58,23 @@ SSampleMap sampleMapFor(const CBox& box, int downscale) {
     return map;
 }
 
+bool sampleRegionCovered(const CBox& box, const SP<Render::IFramebuffer>& source, const CRegion& damage) {
+    if (!source)
+        return false;
+
+    // The exact source rect the blit reads, clipped like the blit itself: Hyprland
+    // clips element damage to the monitor, and the clipped-off padding is cleared.
+    const auto   map = sampleMapFor(box, 1);
+    const double x1  = std::max(map.srcX0, 0);
+    const double y1  = std::max(map.srcY0, 0);
+    const double x2  = std::min(map.srcX1, static_cast<int>(source->m_size.x));
+    const double y2  = std::min(map.srcY1, static_cast<int>(source->m_size.y));
+    if (x2 <= x1 || y2 <= y1)
+        return true;
+
+    return CRegion(CBox{x1, y1, x2 - x1, y2 - y1}).subtract(damage).empty();
+}
+
 SFoldedBlur foldBlurPasses(float radius, int iterations) noexcept {
     const float totalRadius      = radius * std::sqrt(static_cast<float>(iterations));
     const float cappedRatio      = totalRadius / BLUR_SHADER_TAP_CAP;
@@ -134,6 +151,11 @@ void sampleBackground(SP<Render::IFramebuffer>& sampleFramebuffer, SP<Render::IF
     // That scissor state leaks here and clips glBlitFramebuffer on the
     // DRAW framebuffer, causing partial writes and stale noise artifacts.
     g_pHyprOpenGL->setCapStatus(GL_SCISSOR_TEST, false);
+    // the tracker skips glDisable when it believes the test is already off
+    if (glIsEnabled(GL_SCISSOR_TEST)) {
+        glDisable(GL_SCISSOR_TEST);
+        Diagnostics::recordStateDesync("scissor on before the background blit");
+    }
 
     // Clear the sample FBO before blitting only when the blit destination
     // doesn't cover the whole FBO. Clamped regions (near monitor edges)
@@ -338,6 +360,18 @@ void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, in
 
     const auto& blurUniforms = shaderManager.blurUniforms;
 
+    // Each pass overwrites its whole target: blending would mix in the temp FBO's
+    // previous contents, a leaked scissor or stencil would leave texels unwritten.
+    g_pHyprRenderer->blend(false);
+    if (glIsEnabled(GL_SCISSOR_TEST)) {
+        glDisable(GL_SCISSOR_TEST);
+        Diagnostics::recordStateDesync("scissor on before the blur passes");
+    }
+    if (glIsEnabled(GL_STENCIL_TEST)) {
+        glDisable(GL_STENCIL_TEST);
+        Diagnostics::recordStateDesync("stencil on before the blur passes");
+    }
+
     auto shader = g_pHyprOpenGL->useShader(shaderManager.blurShader);
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_FALSE, FULLSCREEN_PROJECTION);
     shader->setUniformInt(SHADER_TEX, 0);
@@ -365,6 +399,7 @@ void blurBackground(SP<Render::IFramebuffer> sampleFramebuffer, float radius, in
     // The viewport must match the re-bound framebuffer's own size: monitor
     // sizes are wrong here on 90°/270° monitors, where m_transformedSize is
     // swapped relative to the framebuffer's native orientation (#41).
+    g_pHyprRenderer->blend(true); // Hyprland's state at every element boundary
     glBindFramebuffer(GL_FRAMEBUFFER, fbId(callerFramebuffer));
     glBindVertexArray(0);
     g_pHyprOpenGL->setViewport(0, 0,
@@ -418,11 +453,14 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     shader->setUniformFloat2(SHADER_FULL_SIZE,
         static_cast<float>(fullSize.x), static_cast<float>(fullSize.y));
 
+    // a rounding_power window rule bypasses Hyprland's [2, 10] clamp; <= 0 is NaN in the SDF
+    const float safeRoundingPower = std::max(roundingPower, 1.0f);
+
     // Reciprocals computed once per draw instead of once per pixel in the shader.
     const float minDimensionPx = static_cast<float>(std::min(fullSize.x, fullSize.y));
     glUniform2f(uniforms.invFullSize,
         1.0f / static_cast<float>(fullSize.x), 1.0f / static_cast<float>(fullSize.y));
-    glUniform1f(uniforms.invRoundingPower, 1.0f / roundingPower);
+    glUniform1f(uniforms.invRoundingPower, 1.0f / safeRoundingPower);
 
     const float edgeThicknessValue = resolvePresetFloat(resolveContext, &SPresetValues::edgeThickness, &SOverridableConfig::edgeThickness);
     const float lensDistortionValue = resolvePresetFloat(resolveContext, &SPresetValues::lensDistortion, &SOverridableConfig::lensDistortion);
@@ -516,7 +554,7 @@ void applyGlassEffect(SP<Render::IFramebuffer> sampleFramebuffer, SP<Render::IFr
     }
 
     shader->setUniformFloat(SHADER_RADIUS, cornerRadius);
-    shader->setUniformFloat(SHADER_ROUNDING_POWER, roundingPower);
+    shader->setUniformFloat(SHADER_ROUNDING_POWER, safeRoundingPower);
 
     glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
 

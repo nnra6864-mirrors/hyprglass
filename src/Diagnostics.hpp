@@ -23,12 +23,13 @@ struct SMonitorCounters {
     uint64_t windowCacheMisses       = 0;
     uint64_t windowDeferredResamples = 0;
     uint64_t windowPassDiscarded     = 0;
-    uint64_t layerGlassDraws     = 0;
-    uint64_t layerCacheHits      = 0;
-    uint64_t layerCacheMisses    = 0;
-    uint64_t blurPasses          = 0;
-    double   sampledMegapixels   = 0.0;
-    double   glassMegapixels     = 0.0;
+    uint64_t layerGlassDraws        = 0;
+    uint64_t layerCacheHits         = 0;
+    uint64_t layerCacheMisses       = 0;
+    uint64_t layerDeferredResamples = 0;
+    uint64_t blurPasses             = 0;
+    double   sampledMegapixels      = 0.0;
+    double   glassMegapixels        = 0.0;
 };
 
 void recordFrame(MONITORID monitor);
@@ -44,7 +45,10 @@ void recordWindowPassDiscarded(MONITORID monitor);
 void recordLayerGlassDraw(MONITORID monitor);
 void recordLayerCacheHit(MONITORID monitor);
 void recordLayerCacheMiss(MONITORID monitor);
+void recordLayerDeferredResample(MONITORID monitor);
 void recordBlurPasses(MONITORID monitor, uint64_t passes);
+// GL state found different from what Hyprland's tracker reports; rate-limited notification.
+void recordStateDesync(const char* what);
 void recordSampledPixels(MONITORID monitor, double pixels);
 void recordGlassPixels(MONITORID monitor, double pixels);
 
